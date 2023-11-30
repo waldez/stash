@@ -17,18 +17,20 @@ function generate_unique_id() {
 }
 
 function stash_file() {
-    local file_path=$(realpath "$1")
-    if [ ! -f "$file_path" ]; then
-        echo "Error: File does not exist."
-        return
-    fi
-    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-    local unique_id=$(generate_unique_id)
+    for file_path in "$@"; do
+        local real_path=$(realpath "$file_path")
+        if [ ! -f "$real_path" ]; then
+            echo "Error: File $file_path does not exist."
+            continue
+        fi
+        local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+        local unique_id=$(generate_unique_id)
 
-    cp "$file_path" "$STASH_DIR/$unique_id"
-    echo "$timestamp,$unique_id,$file_path" >> "$LOG_FILE"
-    rm "$file_path"
-    echo "Stashed: $file_path with ID $unique_id"
+        cp "$real_path" "$STASH_DIR/$unique_id"
+        echo "$timestamp,$unique_id,$real_path" >> "$LOG_FILE"
+        rm "$real_path"
+        echo "Stashed: $real_path with ID $unique_id"
+    done
 }
 
 function list_stashed_files() {
@@ -37,33 +39,53 @@ function list_stashed_files() {
 }
 
 function restore_file() {
-    local unique_id="$1"
-    local line=$(grep ",$unique_id," "$LOG_FILE")
+    for unique_id in "$@"; do
+        local line=$(grep ",$unique_id," "$LOG_FILE")
 
-    if [ -n "$line" ]; then
-        local original_path=$(echo "$line" | cut -d ',' -f3)
-        if [ ! -f "$STASH_DIR/$unique_id" ]; then
-            echo "Error: Stashed file does not exist."
-            return
-        fi
-        mv "$STASH_DIR/$unique_id" "$original_path"
-        grep -v ",$unique_id," "$LOG_FILE" > "$LOG_FILE.tmp"
-        if [ -s "$LOG_FILE.tmp" ]; then
-            mv "$LOG_FILE.tmp" "$LOG_FILE"
+        if [ -n "$line" ]; then
+            local original_path=$(echo "$line" | cut -d ',' -f3)
+            if [ ! -f "$STASH_DIR/$unique_id" ]; then
+                echo "Error: Stashed file $unique_id does not exist."
+                continue
+            fi
+            mv "$STASH_DIR/$unique_id" "$original_path"
+            grep -v ",$unique_id," "$LOG_FILE" > "$LOG_FILE.tmp"
+            if [ -s "$LOG_FILE.tmp" ]; then
+                mv "$LOG_FILE.tmp" "$LOG_FILE"
+            else
+                rm "$LOG_FILE.tmp" "$LOG_FILE"
+            fi
+            echo "Restored: $original_path"
         else
-            rm "$LOG_FILE.tmp" "$LOG_FILE"
+            echo "File with ID $unique_id not found."
         fi
-        echo "Restored: $original_path"
-    else
-        echo "File not found."
-    fi
+    done
+}
+
+function clear_stash() {
+    rm -rf "$STASH_DIR"/*
+    > "$LOG_FILE"
+    echo "Stash cleared."
+}
+
+function remove_ids() {
+    for unique_id in "$@"; do
+        if grep -q ",$unique_id," "$LOG_FILE"; then
+            rm -f "$STASH_DIR/$unique_id"
+            grep -v ",$unique_id," "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
+            echo "Removed ID: $unique_id"
+        else
+            echo "ID $unique_id not found."
+        fi
+    done
 }
 
 case "$1" in
     s)
         ;&
     stash)
-        stash_file "$2"
+        shift
+        stash_file "$@"
         ;;
     list)
         list_stashed_files
@@ -71,13 +93,21 @@ case "$1" in
     r)
         ;&
     restore)
-        restore_file "$2"
+        shift
+        restore_file "$@"
+        ;;
+    clear)
+        clear_stash
+        ;;
+    remove)
+        shift
+        remove_ids "$@"
         ;;
     help)
-        echo "Usage: stash {stash|list|restore} [file_path|id]"
+        echo "Usage: stash {stash|list|restore|clear|remove} [file_path|id]..."
         ;;
     *)
-        stash_file "$1"
+        stash_file "$@"
         ;;
 esac
 
